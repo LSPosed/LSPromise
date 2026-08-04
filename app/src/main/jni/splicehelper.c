@@ -59,7 +59,7 @@ void start_c(void* argblock) {
     off64_t off = parse_int(*(((char**) argblock)+2));
     int file_fd = mysyscall3(
         (unsigned long) AT_FDCWD,
-        (unsigned long) "/vendor/lib/libstagefright_aidl_bufferpool2.so",
+        (unsigned long) "/vendor/lib64/libstagefright_aidl_bufferpool2.so",
         (unsigned long) O_RDONLY,
         __NR_openat
     );

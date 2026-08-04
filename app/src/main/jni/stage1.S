@@ -18,7 +18,7 @@ L_filename:
     .asciz "/dev/df"
 stage1_stage2_libname:
 lib:
-    .asciz "/vendor/lib/libstagefright_aidl_bufferpool2.so"
+    .asciz "/vendor/lib64/libstagefright_aidl_bufferpool2.so"
 selinux_ctx:
     .asciz "u:r:vendor_modprobe:s0"
 selinux_ctx_end:
@@ -154,7 +154,7 @@ stage2_data:
 executable_path:
     .asciz "/vendor/bin/modprobe"
 lib_path:
-    .asciz "/vendor/lib/libstagefright_aidl_bufferpool2.so"
+    .asciz "/vendor/lib64/libstagefright_aidl_bufferpool2.so"
 mod_args:
     .asciz ""
 shelld:
