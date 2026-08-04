@@ -4,14 +4,18 @@ import static org.lsposed.lspromise.Shellcode.TAG;
 
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
+import android.os.RemoteException;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
@@ -58,6 +62,49 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 
+    private void runAll() {
+        if (controller != null) {
+            new Thread(() -> {
+                var p = Parcel.obtain();
+                var r = Parcel.obtain();
+                var b = new Binder() {
+                    @Override
+                    protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+                        try {
+                            var s = data.readString();
+                            Log.d(TAG, "onTransact " + s);
+                            runOnUiThread(() -> {
+                                tv.append(s);
+                            });
+                        } catch (Throwable t) {
+                            Log.e(TAG, "recv failed", t);
+                        }
+                        return true;
+                    }
+                };
+                p.writeStrongBinder(b);
+                try {
+                    if (controller.transact(5, p, r, 0)) {
+                        var res = r.readInt();
+                        runOnUiThread(() -> {
+                            tv.append("\nrunall done res=" + res + "\n");
+                        });
+                    } else {
+                        throw new IllegalStateException("return false");
+                    }
+                } catch (Throwable t) {
+                    Log.e(TAG, "runall failed", t);
+                    runOnUiThread(() -> {
+                        tv.append("runall failed: " + t.getMessage() + "\n");
+                    });
+                } finally {
+                    p.recycle();
+                    r.recycle();
+                }
+            }).start();
+        }
+    }
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
@@ -91,6 +138,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
         forkProcess.setOnClickListener(v -> {
             doAction(4, "forkProcess");
         });
+        var patchAll = (Button) findViewById(R.id.patchAll);
+        patchAll.setOnClickListener(v -> {
+            runAll();
+        });
+        var copyAll = (Button) findViewById(R.id.copyAll);
+        copyAll.setOnClickListener(v -> {
+            var cm = getSystemService(ClipboardManager.class);
+            cm.setPrimaryClip(ClipData.newPlainText("", tv.getText().toString()));
+        });
         receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -103,6 +159,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     patchLibc.setVisibility(View.VISIBLE);
                     patchCxx.setVisibility(View.VISIBLE);
                     forkProcess.setVisibility(View.VISIBLE);
+                    patchAll.setVisibility(View.VISIBLE);
                 } catch (Throwable t) {
                     Log.e(TAG, "resolve controller", t);
                 }

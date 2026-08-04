@@ -34,6 +34,17 @@
     <Button
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:text="patchAll"
+        android:visibility="gone"
+        android:id="@+id/patchAll"/>
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="copyAll"
+        android:id="@+id/copyAll"/>
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:text="forkProcess"
         android:visibility="gone"
         android:id="@+id/forkProcess"/>

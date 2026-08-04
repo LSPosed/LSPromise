@@ -96,6 +96,14 @@ public class Shellcode extends BroadcastReceiver {
                         reply.writeInt(DirtyFrag.createOrphanProcess());
                         return true;
                     }
+                    case 5 -> {
+                        Log.d(TAG, "run all");
+                        var reporter = data.readStrongBinder();
+                        var df = new DirtyFrag(reporter);
+                        df.runAll();
+                        reply.writeInt(1);
+                        return true;
+                    }
                 }
                 return super.onTransact(code, data, reply, flags);
             }
