@@ -11,7 +11,7 @@
     <Button
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Run exploit"
+        android:text="Run userspace exploit"
         android:id="@+id/exploit"/>
     <Button
         android:layout_width="match_parent"
