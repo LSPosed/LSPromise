@@ -1,17 +1,17 @@
-## LSPromise
-Complete exploit chain allowing privilege escalation from local untrusted app to root/kernel.
+# LSPromise
+A complete exploit chain that enables privilege escalation from a local untrusted app to root/kernel.
 
-Tested on Pixel 10 running the initial Android 17 official release.
+Tested on Pixel 10 running the initial Android 17 official release. Note that it didn't work on Pixel 6a and might be on other devices running `6.1.x-android14` kernel trees due to another bug in these kernels.
 
 Usage: Install KernelSU app, open this app, click "Run userspace exploit" then "Run kernel exploit and load KernelSU". After a successful exploitation, KernelSU will be activated and you can use it to grant root access to other apps.
 
-Screen recording: https://t.me/LSPosed/322
+Screen recording: [click here](VID_20260804_231937_915.mp4)
 
 ## Writeup
-The chain is made from two distinct vulnerabilities: one is a 0-day in the Telecom service, the other is a kernel 1-day disclosed 3 months ago, but Android remains vulnerable to it at the time of writing.
+The chain is made from two distinct vulnerabilities: one is a 0-day in the Telecom service, while the other is a kernel 1-day that was disclosed 3 months ago. But AOSP and Pixel devices (except those running beta QPR versions) remain vulnerable at the time of writing.
 
 ### Getting into system_server
-The first vulnerability of the chain is a simple logic bug introduced in Android 17. It originates from [a crazy change](https://cs.android.com/android/_/android/platform/packages/services/Telecomm/+/478761578b3ccb380410a4f5e82e1d0e388d59cf), which adds [the following code](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/src/com/android/server/telecom/InCallController.java;l=2644-2663) to the InCallController.java:
+The first vulnerability of the chain is a simple logic bug introduced in Android 17. It originates from [a crazy change](https://cs.android.com/android/_/android/platform/packages/services/Telecomm/+/478761578b3ccb380410a4f5e82e1d0e388d59cf), which adds [the following code](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/src/com/android/server/telecom/InCallController.java;l=2644-2663) to `InCallController.java`:
 ```java
         PackageManager packageManager = mContext.getPackageManager();
         Context userContext = mContext.createContextAsUser(userHandle,
@@ -36,7 +36,7 @@ The first vulnerability of the chain is a simple logic bug introduced in Android
             }
         }
 ```
-Where the [`serviceClassExists()` method is defined as follows](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/src/com/android/server/telecom/InCallController.java;l=2603-2627):
+The relevant [`serviceClassExists()` method is defined as follows](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/src/com/android/server/telecom/InCallController.java;l=2603-2627):
 ```java
     /**
      * Verifies that the class for a given ServiceInfo exists within its package.
@@ -64,9 +64,9 @@ Where the [`serviceClassExists()` method is defined as follows](https://cs.andro
         }
     }
 ```
-This is the most unbelievable vulnerability I've ever seen. The code uses `Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY` to load code from an arbitrary app; while there seems to be some effect to protect it from arbitrary code execution, such as passing `false` to `Class.forName()` so it won't trigger class initialization, the app can still declare a custom [AppComponentFactory](https://developer.android.com/reference/android/app/AppComponentFactory) and it will be invoked when `getClassLoader()` is called.
+This is the most unbelievable vulnerability I've ever seen. The code uses `Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY` to load code from an arbitrary app; While there appear to be some measures intended to prevent arbitrary code execution, such as passing false to Class.forName() to prevent class initialization, the app can still declare a custom AppComponentFactory that is invoked when getClassLoader() is called.
 
-On the other hand, the bug exists in InCallController.java, which is a part of the `com.android.server.telecom` package rather than `com.android.phone`. It should be noticed that the package [declares `android:sharedUserId="android.uid.system"` and `android:process="system"` in AndroidManifest.xml](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/AndroidManifest.xml;l=93), so it runs in the `system_server` process, one of the most privileged userspace process in Android. Therefore, we now have the ability to execute arbitrary Java code inside `system_server`.
+On the other hand, the bug exists in `InCallController.java`, which is a part of the `com.android.server.telecom` package rather than `com.android.phone`. It is worth noting that the package [declares `android:sharedUserId="android.uid.system"` and `android:process="system"` in AndroidManifest.xml](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:packages/services/Telecomm/AndroidManifest.xml;l=93), so it runs in the `system_server` process, one of the most privileged userspace processes in Android. Therefore, we now have the ability to execute arbitrary Java code inside `system_server`.
 
 It's a surprise that even a Google engineer can make such a big mistake in the AI era. We found and reported it to the Android Security Team on July 23, 2026. They told us it was a duplicate. Google has switched the monthly security bulletin to quarterly release, which may explain why the vulnerability was not fixed three months after the release of Android 17.
 
@@ -87,14 +87,14 @@ neverallow { appdomain -network_stack }
 ```
 The only allowed domains are [`system_server`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/system_server.te;l=190-195), [`network_stack`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/network_stack.te;l=93-98) and [`netd`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/netd.te;l=143-148). In order to exploit DirtyFrag, attackers must first compromise one of the allowlisted privileged process.
 
-Combine two bugs together. While the userspace bug allows us to execute Java code inside `system_server`, SELinux also forbids `system_server` from either [loading native libraries from `/data`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/system_server.te;l=1559-1562) or [mapping anonymous executable memory](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/system_server.te;l=1572-1580). This makes us impossible to use native languages, increasing the difficulty of exploitation. It would be better if we could inject code into `com.android.networkstack`, which could load native code from our APK and had enough privileges to exploit DirtyFrag.
+Combine two bugs together. While the userspace bug allows us to execute Java code inside `system_server`, SELinux also forbids `system_server` from either [loading native libraries from `/data`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/system_server.te;l=1559-1562) or [mapping anonymous executable memory](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:system/sepolicy/private/system_server.te;l=1572-1580). This makes it impossible to use native code, increasing the difficulty of exploitation. It would therefore be preferable to execute code inside com.android.networkstack, which can load native code from our APK and has sufficient privileges to exploit DirtyFrag.
 
-Luckily, `system_server` is the process where `ActivityManager` runs. `ActivityManager` stores [`IApplicationThread`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:frameworks/base/core/java/android/app/IApplicationThread.aidl)s of every app processes into [a Java map](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:frameworks/base/services/core/java/com/android/server/am/ProcessList.java;l=771) and since we run as the same process of `ActivityManager` we can retrieve them using Java reflection. With this, we can send arbitrary commands to `com.android.networkstack` to force it to load our code. 
+Luckily, `system_server` is the process where `ActivityManager` runs. `ActivityManager` stores [`IApplicationThread`](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:frameworks/base/core/java/android/app/IApplicationThread.aidl) handles of every app process into [a Java map](https://cs.android.com/android/platform/superproject/+/android-17.0.0_r1:frameworks/base/services/core/java/com/android/server/am/ProcessList.java;l=771) and since we run as the same process of `ActivityManager` we can retrieve them using Java reflection. With this, we can send arbitrary commands to `com.android.networkstack` to force it to load our code. For more information on this trick, please refer to [my previous exploit for CVE-2026-0091](https://github.com/canyie/TransitionPlayer).
 
 ### Getting into kernel
 DirtyFrag allows to overwrite read-only files. This is a powerful primitive in Linux world, because we can overwrite the `su` binary which has the `SUID` bit. However, we don't have `su` in Android world. We refer to [polygraphene's exploit for DirtyPipe](https://github.com/polygraphene/DirtyPipe-Android/blob/master/TECHNICAL-DETAILS.md) to turn DirtyFrag into kernel code execution on Android:
 1. We patch `libc.so`, `libc++.so` and `/vendor/lib64/libstagefright_aidl_bufferpool2.so` through DirtyFrag. `libstagefright_aidl_bufferpool2.so` has `vendor_file` domain so it can't be accessed from network stack process. The solution is to patch `/apex/com.android.runtime/bin/crash_dump64` first, execute it, and once we transition to the `crash_dump` domain we can open `libstagefright_aidl_bufferpool2.so`.
-2. Create and destroy an orphan process to trigger code execution in init process. Because `libc++.so` is patched, our code gets executed in UID 0 with the `init` domain. We then execute `/vendor/bin/modprobe` to transit to `vendor_modprobe` domain.
+2. Create and destroy an orphan process to trigger code execution in init process. Because `libc++.so` is patched, our code gets executed as UID 0 with the `init` domain. We then execute `/vendor/bin/modprobe` to transition to `vendor_modprobe` domain.
 3. When `modprobe` is executed, because `libc.so` is also patched, our code is executed under `vendor_modprobe` domain. We can now load kernel modules but only for files that have specified labels. We load `libstagefright_aidl_bufferpool2.so` which has `vendor_file` label.
 4. Since we patched `libstagefright_aidl_bufferpool2.so`, the real content of that file got replaced by our own kernel module. Kernel module gets loaded, and now we can do anything, including adjusting SELinux policy or setting SELinux to permissive.
-5. We set SELinux to permissive. Now we have UID 0 with SELinux permissive, we launch KernelSU for you.
+5. We set SELinux to permissive. We now have UID 0 with SELinux disabled; we launch KernelSU for you.
