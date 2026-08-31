@@ -1,5 +1,5 @@
 # LSPromise
-A complete exploit chain that enables privilege escalation from a local untrusted app to root/kernel.
+A complete exploit chain that enables privilege escalation from a local untrusted app to root/kernel. It does not involve memory corruptions or race conditions, so attackers don't need to perform complex heap spraying or bypass mitigations against memory corruption vulnerabilities such as KASLR, MTE or CFI, making this exploit chain a 100% success rate on vulnerable devices.
 
 Tested on Pixel 10 running the initial Android 17 official release. Note that it does not work on Pixel 6a and this issue may also occur on other devices running `6.1.xxx-android14` kernel trees due to another bug in these kernels.
 
