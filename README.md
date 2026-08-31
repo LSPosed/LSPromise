@@ -3,7 +3,7 @@ A complete exploit chain that enables privilege escalation from a local untruste
 
 Tested on Pixel 10 running the initial Android 17 official release. Note that it does not work on Pixel 6a and this issue may also occur on other devices running `6.1.xxx-android14` kernel trees due to another bug in these kernels.
 
-Usage: Install KernelSU app, open this app, click "Run userspace exploit" then "Run kernel exploit and load KernelSU". After a successful exploitation, KernelSU will be activated and you can use it to grant root access to other apps.
+Usage: Install KernelSU app, open this app, click "Run userspace exploit" then "Run kernel exploit and load KernelSU". After a successful exploitation, KernelSU will be activated and you can use it to grant root access to other apps. Known issue: If you have already run the kernel exploit and want to run it again, you need to reboot the device.
 
 Screen recording: [click here](VID_20260804_231937_915.mp4)
 
