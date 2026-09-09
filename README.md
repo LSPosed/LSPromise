@@ -70,6 +70,8 @@ On the other hand, the bug exists in `InCallController.java`, which is a part of
 
 It's a surprise that even a Google engineer can make such a big mistake in the AI era. We found and reported it to the Android Security Team on July 23, 2026. They told us it was a duplicate. Google has switched the monthly security bulletin to quarterly release, which may explain why the vulnerability was not fixed 3 months after the release of Android 17.
 
+The vulnerability was assigned CVE-2026-49881 and fixed in [September 2026](https://source.android.com/docs/security/bulletin/2026/2026-09-01) by [Remove serviceClassExists logic to address security vulnerability](https://android.googlesource.com/platform/packages/services/Telecomm/+/668eb07260ec0f1fbb00910f2b31a4c10b857906).
+
 ### Getting into network stack
 The first bug allows us to escalate privileges to system, but is still far away from root. A complete root requires at least UID 0 and not being restricted by SELinux.
 
